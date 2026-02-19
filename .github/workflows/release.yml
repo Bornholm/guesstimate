@@ -24,6 +24,7 @@ jobs:
       - uses: actions/setup-go@v4
         with:
           cache: true
+          go-version-file: "go.mod"
       - uses: goreleaser/goreleaser-action@v4
         with:
           distribution: goreleaser
