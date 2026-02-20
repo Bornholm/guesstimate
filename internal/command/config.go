@@ -177,5 +177,5 @@ func init() {
 
 	configInitCmd.Flags().BoolP("force", "f", false, "Force overwrite existing configuration")
 	configViewCmd.Flags().StringP("format", "f", "yaml", "Output format (yaml, json)")
-	configCategoryAddCmd.Flags().Float64P("cost", "c", 500, "Cost per time unit")
+	configCategoryAddCmd.Flags().Float64("cost", 500, "Cost per time unit")
 }
