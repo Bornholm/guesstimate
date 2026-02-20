@@ -1,6 +1,7 @@
 package command
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/bornholm/guesstimate/internal/model"
 	"github.com/bornholm/guesstimate/internal/stats"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 // newCmd represents the new command
@@ -173,10 +175,93 @@ var summaryCmd = &cobra.Command{
 	},
 }
 
+// EstimationListItem represents an item in the estimation list output
+type EstimationListItem struct {
+	File  string `json:"file" yaml:"file"`
+	Label string `json:"label" yaml:"label"`
+	Tasks int    `json:"tasks" yaml:"tasks"`
+}
+
+// listCmd represents the list command
+var listCmd = &cobra.Command{
+	Use:   "list [directory]",
+	Short: "List estimation files",
+	Long:  `List all estimation files in the specified directory (default: current directory).`,
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dir := "."
+		if len(args) > 0 {
+			dir = args[0]
+		}
+
+		s := getStore()
+
+		files, err := s.ListEstimations(dir)
+		if err != nil {
+			return fmt.Errorf("failed to list estimations: %w", err)
+		}
+
+		if len(files) == 0 {
+			fmt.Println("No estimation files found.")
+			return nil
+		}
+
+		// Build list items
+		var items []EstimationListItem
+		for _, file := range files {
+			// Try to load the estimation to get its label
+			filePath := file
+			if dir != "." {
+				filePath = dir + "/" + file
+			}
+			estimation, err := s.LoadEstimation(filePath)
+			if err != nil {
+				items = append(items, EstimationListItem{
+					File:  file,
+					Label: "(error loading)",
+					Tasks: 0,
+				})
+				continue
+			}
+			items = append(items, EstimationListItem{
+				File:  file,
+				Label: estimation.Label,
+				Tasks: len(estimation.Tasks),
+			})
+		}
+
+		// Get format flag
+		formatType, _ := cmd.Flags().GetString("format")
+
+		switch formatType {
+		case "json":
+			data, err := json.MarshalIndent(items, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal to JSON: %w", err)
+			}
+			fmt.Println(string(data))
+		case "yaml":
+			data, err := yaml.Marshal(items)
+			if err != nil {
+				return fmt.Errorf("failed to marshal to YAML: %w", err)
+			}
+			fmt.Print(string(data))
+		default:
+			fmt.Println("Estimation files:")
+			for _, item := range items {
+				fmt.Printf("  %s - %s (%d tasks)\n", item.File, item.Label, item.Tasks)
+			}
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(newCmd)
 	rootCmd.AddCommand(viewCmd)
 	rootCmd.AddCommand(summaryCmd)
+	rootCmd.AddCommand(listCmd)
 
 	// new command flags
 	newCmd.Flags().StringP("output", "o", "", "Output file path (default: <name>.estimation.yml)")
@@ -186,4 +271,7 @@ func init() {
 	// view command flags
 	viewCmd.Flags().StringP("format", "f", "markdown", "Output format (markdown, json, yaml)")
 	viewCmd.Flags().StringP("output", "o", "", "Output file path (default: stdout)")
+
+	// list command flags
+	listCmd.Flags().StringP("format", "f", "text", "Output format (text, json, yaml)")
 }
