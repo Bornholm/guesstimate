@@ -108,7 +108,17 @@ type CostDetail struct {
 
 // Format formats an estimation as JSON
 func (f *JSONFormatter) Format(estimation *model.Estimation) (string, error) {
-	output := f.BuildOutput(estimation)
+	output := f.BuildOutput(estimation, 1.0)
+	data, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(data) + "\n", nil
+}
+
+// FormatWithFactor formats an estimation as JSON with a time factor applied
+func (f *JSONFormatter) FormatWithFactor(estimation *model.Estimation, timeFactor float64) (string, error) {
+	output := f.BuildOutput(estimation, timeFactor)
 	data, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
 		return "", err
@@ -117,11 +127,15 @@ func (f *JSONFormatter) Format(estimation *model.Estimation) (string, error) {
 }
 
 // BuildOutput builds the output structure
-func (f *JSONFormatter) BuildOutput(estimation *model.Estimation) *Output {
+func (f *JSONFormatter) BuildOutput(estimation *model.Estimation, timeFactor float64) *Output {
 	projectEst := stats.CalculateProjectEstimation(estimation)
 	distribution := stats.CalculateCategoryDistribution(estimation, f.config)
 	costs := stats.CalculateMinMaxCosts(estimation, f.config, stats.Confidence997)
 	roundUp := f.config.RoundUpEstimations
+
+	// Apply time factor to weighted mean and standard deviation
+	weightedMean := projectEst.WeightedMean * timeFactor
+	standardDeviation := projectEst.StandardDeviation * timeFactor
 
 	// Build tasks output
 	tasks := make([]TaskOutput, 0, len(estimation.Tasks))
@@ -134,13 +148,13 @@ func (f *JSONFormatter) BuildOutput(estimation *model.Estimation) *Output {
 			Category:      task.Category,
 			CategoryLabel: cat.Label,
 			Estimations: EstimationOutput{
-				Optimistic:  task.Estimations.Optimistic,
-				Likely:      task.Estimations.Likely,
-				Pessimistic: task.Estimations.Pessimistic,
+				Optimistic:  task.Estimations.Optimistic * timeFactor,
+				Likely:      task.Estimations.Likely * timeFactor,
+				Pessimistic: task.Estimations.Pessimistic * timeFactor,
 			},
 			Calculated: TaskCalculatedOutput{
-				WeightedMean:      roundFloat(task.WeightedMean(), roundUp),
-				StandardDeviation: roundFloat(task.StandardDeviation(), roundUp),
+				WeightedMean:      roundFloat(task.WeightedMean()*timeFactor, roundUp),
+				StandardDeviation: roundFloat(task.StandardDeviation()*timeFactor, roundUp),
 			},
 		})
 	}
@@ -151,7 +165,7 @@ func (f *JSONFormatter) BuildOutput(estimation *model.Estimation) *Output {
 		catDist = append(catDist, CategoryDistributionOutput{
 			CategoryID:    dist.CategoryID,
 			CategoryLabel: dist.CategoryLabel,
-			Time:          roundFloat(dist.Time, roundUp),
+			Time:          roundFloat(dist.Time*timeFactor, roundUp),
 			Percentage:    dist.Percentage,
 		})
 	}
@@ -160,8 +174,8 @@ func (f *JSONFormatter) BuildOutput(estimation *model.Estimation) *Output {
 	costsByCategory := make(map[string]CostDetail)
 	for catID, catCost := range costs.Max.Details {
 		costsByCategory[catID] = CostDetail{
-			Time: roundFloat(catCost.Time, roundUp),
-			Cost: roundFloat(catCost.Cost, false),
+			Time: roundFloat(catCost.Time*timeFactor, roundUp),
+			Cost: roundFloat(catCost.Cost*timeFactor, false),
 		}
 	}
 
@@ -174,36 +188,36 @@ func (f *JSONFormatter) BuildOutput(estimation *model.Estimation) *Output {
 		Tasks:       tasks,
 		Statistics: StatisticsOutput{
 			TaskCount:         len(estimation.Tasks),
-			WeightedMean:      roundFloat(projectEst.WeightedMean, roundUp),
-			StandardDeviation: roundFloat(projectEst.StandardDeviation, roundUp),
+			WeightedMean:      roundFloat(weightedMean, roundUp),
+			StandardDeviation: roundFloat(standardDeviation, roundUp),
 			Confidence68: ConfidenceOutput{
 				Level:     "68%",
-				Mean:      roundFloat(projectEst.WeightedMean, roundUp),
-				Deviation: roundFloat(projectEst.StandardDeviation, roundUp),
-				Min:       roundFloat(projectEst.WeightedMean-projectEst.StandardDeviation, roundUp),
-				Max:       roundFloat(projectEst.WeightedMean+projectEst.StandardDeviation, roundUp),
+				Mean:      roundFloat(weightedMean, roundUp),
+				Deviation: roundFloat(standardDeviation, roundUp),
+				Min:       roundFloat(weightedMean-standardDeviation, roundUp),
+				Max:       roundFloat(weightedMean+standardDeviation, roundUp),
 			},
 			Confidence90: ConfidenceOutput{
 				Level:     "90%",
-				Mean:      roundFloat(projectEst.WeightedMean, roundUp),
-				Deviation: roundFloat(projectEst.StandardDeviation*1.645, roundUp),
-				Min:       roundFloat(projectEst.WeightedMean-projectEst.StandardDeviation*1.645, roundUp),
-				Max:       roundFloat(projectEst.WeightedMean+projectEst.StandardDeviation*1.645, roundUp),
+				Mean:      roundFloat(weightedMean, roundUp),
+				Deviation: roundFloat(standardDeviation*1.645, roundUp),
+				Min:       roundFloat(weightedMean-standardDeviation*1.645, roundUp),
+				Max:       roundFloat(weightedMean+standardDeviation*1.645, roundUp),
 			},
 			Confidence997: ConfidenceOutput{
 				Level:     "99.7%",
-				Mean:      roundFloat(projectEst.WeightedMean, roundUp),
-				Deviation: roundFloat(projectEst.StandardDeviation*3, roundUp),
-				Min:       roundFloat(projectEst.WeightedMean-projectEst.StandardDeviation*3, roundUp),
-				Max:       roundFloat(projectEst.WeightedMean+projectEst.StandardDeviation*3, roundUp),
+				Mean:      roundFloat(weightedMean, roundUp),
+				Deviation: roundFloat(standardDeviation*3, roundUp),
+				Min:       roundFloat(weightedMean-standardDeviation*3, roundUp),
+				Max:       roundFloat(weightedMean+standardDeviation*3, roundUp),
 			},
 		},
 		CategoryDistribution: catDist,
 		Costs: CostOutput{
 			Currency:   f.config.Currency,
 			TimeUnit:   f.config.TimeUnit.Acronym,
-			Max:        CostDetail{Time: roundFloat(costs.Max.TotalTime, roundUp), Cost: roundFloat(costs.Max.TotalCost, false)},
-			Min:        CostDetail{Time: roundFloat(costs.Min.TotalTime, roundUp), Cost: roundFloat(costs.Min.TotalCost, false)},
+			Max:        CostDetail{Time: roundFloat(costs.Max.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Max.TotalCost*timeFactor, false)},
+			Min:        CostDetail{Time: roundFloat(costs.Min.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Min.TotalCost*timeFactor, false)},
 			ByCategory: costsByCategory,
 		},
 	}
@@ -215,4 +229,166 @@ func roundFloat(value float64, roundUp bool) float64 {
 		return math.Ceil(value)
 	}
 	return value
+}
+
+// SynthesisOutput represents the combined output of multiple estimations
+type SynthesisOutput struct {
+	// Optional label for the synthesis
+	Label string `json:"label,omitempty"`
+
+	// Source estimations
+	Sources []SynthesisSource `json:"sources"`
+
+	// Total number of tasks across all estimations
+	TotalTasks int `json:"totalTasks"`
+
+	// Calculated statistics
+	Statistics StatisticsOutput `json:"statistics"`
+
+	// Category distribution
+	CategoryDistribution []CategoryDistributionOutput `json:"categoryDistribution"`
+
+	// Cost estimation
+	Costs CostOutput `json:"costs"`
+
+	// Optional: all tasks from all estimations
+	Tasks []TaskOutput `json:"tasks,omitempty"`
+}
+
+// SynthesisSource represents a source estimation in the synthesis
+type SynthesisSource struct {
+	File  string `json:"file"`
+	Label string `json:"label"`
+	Tasks int    `json:"tasks"`
+}
+
+// SynthesisInput represents input for building synthesis output
+type SynthesisInput struct {
+	Label        string
+	Sources      []SynthesisSource
+	Estimations  []*model.Estimation
+	IncludeTasks bool
+	TimeFactor   float64
+}
+
+// BuildSynthesisOutput builds the synthesis output structure
+func (f *JSONFormatter) BuildSynthesisOutput(input *SynthesisInput) *SynthesisOutput {
+	projectEst := stats.CalculateSynthesisEstimation(input.Estimations)
+	distribution := stats.CalculateSynthesisCategoryDistribution(input.Estimations, f.config)
+	costs := stats.CalculateSynthesisMinMaxCosts(input.Estimations, f.config, stats.Confidence997)
+	roundUp := f.config.RoundUpEstimations
+
+	// Apply time factor (default to 1.0 if not set)
+	timeFactor := input.TimeFactor
+	if timeFactor == 0 {
+		timeFactor = 1.0
+	}
+
+	// Apply time factor to weighted mean and standard deviation
+	weightedMean := projectEst.WeightedMean * timeFactor
+	standardDeviation := projectEst.StandardDeviation * timeFactor
+
+	// Count total tasks
+	totalTasks := 0
+	for _, est := range input.Estimations {
+		totalTasks += len(est.Tasks)
+	}
+
+	// Build tasks output if requested
+	var tasks []TaskOutput
+	if input.IncludeTasks {
+		tasks = make([]TaskOutput, 0, totalTasks)
+		for _, est := range input.Estimations {
+			for _, task := range est.GetOrderedTasks() {
+				cat := f.config.GetTaskCategory(task.Category)
+				tasks = append(tasks, TaskOutput{
+					ID:            string(task.ID),
+					Label:         task.Label,
+					Description:   task.Description,
+					Category:      task.Category,
+					CategoryLabel: cat.Label,
+					Estimations: EstimationOutput{
+						Optimistic:  task.Estimations.Optimistic * timeFactor,
+						Likely:      task.Estimations.Likely * timeFactor,
+						Pessimistic: task.Estimations.Pessimistic * timeFactor,
+					},
+					Calculated: TaskCalculatedOutput{
+						WeightedMean:      roundFloat(task.WeightedMean()*timeFactor, roundUp),
+						StandardDeviation: roundFloat(task.StandardDeviation()*timeFactor, roundUp),
+					},
+				})
+			}
+		}
+	}
+
+	// Build category distribution
+	catDist := make([]CategoryDistributionOutput, 0, len(distribution))
+	for _, dist := range distribution {
+		catDist = append(catDist, CategoryDistributionOutput{
+			CategoryID:    dist.CategoryID,
+			CategoryLabel: dist.CategoryLabel,
+			Time:          roundFloat(dist.Time*timeFactor, roundUp),
+			Percentage:    dist.Percentage,
+		})
+	}
+
+	// Build costs by category
+	costsByCategory := make(map[string]CostDetail)
+	for catID, catCost := range costs.Max.Details {
+		costsByCategory[catID] = CostDetail{
+			Time: roundFloat(catCost.Time*timeFactor, roundUp),
+			Cost: roundFloat(catCost.Cost*timeFactor, false),
+		}
+	}
+
+	return &SynthesisOutput{
+		Label:      input.Label,
+		Sources:    input.Sources,
+		TotalTasks: totalTasks,
+		Tasks:      tasks,
+		Statistics: StatisticsOutput{
+			TaskCount:         totalTasks,
+			WeightedMean:      roundFloat(weightedMean, roundUp),
+			StandardDeviation: roundFloat(standardDeviation, roundUp),
+			Confidence68: ConfidenceOutput{
+				Level:     "68%",
+				Mean:      roundFloat(weightedMean, roundUp),
+				Deviation: roundFloat(standardDeviation, roundUp),
+				Min:       roundFloat(weightedMean-standardDeviation, roundUp),
+				Max:       roundFloat(weightedMean+standardDeviation, roundUp),
+			},
+			Confidence90: ConfidenceOutput{
+				Level:     "90%",
+				Mean:      roundFloat(weightedMean, roundUp),
+				Deviation: roundFloat(standardDeviation*1.645, roundUp),
+				Min:       roundFloat(weightedMean-standardDeviation*1.645, roundUp),
+				Max:       roundFloat(weightedMean+standardDeviation*1.645, roundUp),
+			},
+			Confidence997: ConfidenceOutput{
+				Level:     "99.7%",
+				Mean:      roundFloat(weightedMean, roundUp),
+				Deviation: roundFloat(standardDeviation*3, roundUp),
+				Min:       roundFloat(weightedMean-standardDeviation*3, roundUp),
+				Max:       roundFloat(weightedMean+standardDeviation*3, roundUp),
+			},
+		},
+		CategoryDistribution: catDist,
+		Costs: CostOutput{
+			Currency:   f.config.Currency,
+			TimeUnit:   f.config.TimeUnit.Acronym,
+			Max:        CostDetail{Time: roundFloat(costs.Max.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Max.TotalCost*timeFactor, false)},
+			Min:        CostDetail{Time: roundFloat(costs.Min.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Min.TotalCost*timeFactor, false)},
+			ByCategory: costsByCategory,
+		},
+	}
+}
+
+// FormatSynthesis formats a synthesis of multiple estimations as JSON
+func (f *JSONFormatter) FormatSynthesis(input *SynthesisInput) (string, error) {
+	output := f.BuildSynthesisOutput(input)
+	data, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(data) + "\n", nil
 }

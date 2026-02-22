@@ -64,6 +64,7 @@ var viewCmd = &cobra.Command{
 		file := args[0]
 		formatType, _ := cmd.Flags().GetString("format")
 		output, _ := cmd.Flags().GetString("output")
+		timeFactor, _ := cmd.Flags().GetFloat64("time-factor")
 
 		s := getStore()
 
@@ -84,24 +85,24 @@ var viewCmd = &cobra.Command{
 		switch formatType {
 		case "markdown", "md":
 			formatter := format.NewMarkdownFormatter(config)
-			result = formatter.Format(estimation)
+			result = formatter.FormatWithFactor(estimation, timeFactor)
 		case "json":
 			formatter := format.NewJSONFormatter(config)
 			var err error
-			result, err = formatter.Format(estimation)
+			result, err = formatter.FormatWithFactor(estimation, timeFactor)
 			if err != nil {
 				return fmt.Errorf("failed to format estimation as JSON: %w", err)
 			}
 		case "yaml", "yml":
 			formatter := format.NewYAMLFormatter(config)
 			var err error
-			result, err = formatter.Format(estimation)
+			result, err = formatter.FormatWithFactor(estimation, timeFactor)
 			if err != nil {
 				return fmt.Errorf("failed to format estimation as YAML: %w", err)
 			}
 		default:
 			formatter := format.NewMarkdownFormatter(config)
-			result = formatter.Format(estimation)
+			result = formatter.FormatWithFactor(estimation, timeFactor)
 		}
 
 		// Output result
@@ -303,12 +304,99 @@ var updateCmd = &cobra.Command{
 	},
 }
 
+// synthesisCmd represents the synthesis command
+var synthesisCmd = &cobra.Command{
+	Use:   "synthesis <file1> <file2> [file3...]",
+	Short: "Synthesize multiple estimations",
+	Long:  `Combine multiple estimations into a single aggregated view with combined statistics.`,
+	Args:  cobra.MinimumNArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		formatType, _ := cmd.Flags().GetString("format")
+		output, _ := cmd.Flags().GetString("output")
+		label, _ := cmd.Flags().GetString("label")
+		includeTasks, _ := cmd.Flags().GetBool("include-tasks")
+		timeFactor, _ := cmd.Flags().GetFloat64("time-factor")
+
+		s := getStore()
+
+		// Load config
+		config, err := s.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("failed to load configuration: %w", err)
+		}
+
+		// Load all estimations
+		var estimations []*model.Estimation
+		var sources []format.SynthesisSource
+
+		for _, file := range args {
+			estimation, err := s.LoadEstimation(file)
+			if err != nil {
+				return fmt.Errorf("failed to load estimation '%s': %w", file, err)
+			}
+			estimations = append(estimations, estimation)
+			sources = append(sources, format.SynthesisSource{
+				File:  file,
+				Label: estimation.Label,
+				Tasks: len(estimation.Tasks),
+			})
+		}
+
+		// Build synthesis input
+		input := &format.SynthesisInput{
+			Label:        label,
+			Sources:      sources,
+			Estimations:  estimations,
+			IncludeTasks: includeTasks,
+			TimeFactor:   timeFactor,
+		}
+
+		var result string
+
+		switch formatType {
+		case "markdown", "md":
+			formatter := format.NewMarkdownFormatter(config)
+			result = formatter.FormatSynthesis(input)
+		case "json":
+			formatter := format.NewJSONFormatter(config)
+			var err error
+			result, err = formatter.FormatSynthesis(input)
+			if err != nil {
+				return fmt.Errorf("failed to format synthesis as JSON: %w", err)
+			}
+		case "yaml", "yml":
+			formatter := format.NewYAMLFormatter(config)
+			var err error
+			result, err = formatter.FormatSynthesis(input)
+			if err != nil {
+				return fmt.Errorf("failed to format synthesis as YAML: %w", err)
+			}
+		default:
+			formatter := format.NewMarkdownFormatter(config)
+			result = formatter.FormatSynthesis(input)
+		}
+
+		// Output result
+		if output != "" {
+			if err := os.WriteFile(output, []byte(result), 0644); err != nil {
+				return fmt.Errorf("failed to write output: %w", err)
+			}
+			fmt.Printf("Output written to %s\n", output)
+		} else {
+			fmt.Print(result)
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(newCmd)
 	rootCmd.AddCommand(viewCmd)
 	rootCmd.AddCommand(summaryCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(synthesisCmd)
 
 	// new command flags
 	newCmd.Flags().StringP("output", "o", "", "Output file path (default: <name>.estimation.yml)")
@@ -318,6 +406,7 @@ func init() {
 	// view command flags
 	viewCmd.Flags().StringP("format", "f", "markdown", "Output format (markdown, json, yaml)")
 	viewCmd.Flags().StringP("output", "o", "", "Output file path (default: stdout)")
+	viewCmd.Flags().Float64("time-factor", 1.0, "Time factor multiplier to apply to estimations")
 
 	// list command flags
 	listCmd.Flags().StringP("format", "f", "text", "Output format (text, json, yaml)")
@@ -325,4 +414,11 @@ func init() {
 	// update command flags
 	updateCmd.Flags().StringP("label", "l", "", "New estimation label")
 	updateCmd.Flags().StringP("description", "d", "", "New estimation description")
+
+	// synthesis command flags
+	synthesisCmd.Flags().StringP("format", "f", "markdown", "Output format (markdown, json, yaml)")
+	synthesisCmd.Flags().StringP("output", "o", "", "Output file path (default: stdout)")
+	synthesisCmd.Flags().StringP("label", "l", "", "Optional label for the synthesis")
+	synthesisCmd.Flags().Bool("include-tasks", false, "Include individual tasks in output")
+	synthesisCmd.Flags().Float64("time-factor", 1.0, "Time factor multiplier to apply to estimations")
 }

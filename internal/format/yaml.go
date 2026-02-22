@@ -19,7 +19,33 @@ func NewYAMLFormatter(config *model.Config) *YAMLFormatter {
 func (f *YAMLFormatter) Format(estimation *model.Estimation) (string, error) {
 	// Use the same output structure as JSON formatter
 	jsonFormatter := NewJSONFormatter(f.config)
-	output := jsonFormatter.BuildOutput(estimation)
+	output := jsonFormatter.BuildOutput(estimation, 1.0)
+
+	data, err := yaml.Marshal(output)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// FormatWithFactor formats an estimation as YAML with a time factor applied
+func (f *YAMLFormatter) FormatWithFactor(estimation *model.Estimation, timeFactor float64) (string, error) {
+	// Use the same output structure as JSON formatter
+	jsonFormatter := NewJSONFormatter(f.config)
+	output := jsonFormatter.BuildOutput(estimation, timeFactor)
+
+	data, err := yaml.Marshal(output)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// FormatSynthesis formats a synthesis of multiple estimations as YAML
+func (f *YAMLFormatter) FormatSynthesis(input *SynthesisInput) (string, error) {
+	// Use the same output structure as JSON formatter
+	jsonFormatter := NewJSONFormatter(f.config)
+	output := jsonFormatter.BuildSynthesisOutput(input)
 
 	data, err := yaml.Marshal(output)
 	if err != nil {

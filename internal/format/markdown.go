@@ -22,6 +22,11 @@ func NewMarkdownFormatter(config *model.Config) *MarkdownFormatter {
 
 // Format formats an estimation as markdown
 func (f *MarkdownFormatter) Format(estimation *model.Estimation) string {
+	return f.FormatWithFactor(estimation, 1.0)
+}
+
+// FormatWithFactor formats an estimation as markdown with a time factor applied
+func (f *MarkdownFormatter) FormatWithFactor(estimation *model.Estimation, timeFactor float64) string {
 	var sb strings.Builder
 
 	// Title
@@ -40,9 +45,13 @@ func (f *MarkdownFormatter) Format(estimation *model.Estimation) string {
 	projectEst := stats.CalculateProjectEstimation(estimation)
 	roundUp := f.config.RoundUpEstimations
 
+	// Apply time factor
+	weightedMean := projectEst.WeightedMean * timeFactor
+	standardDeviation := projectEst.StandardDeviation * timeFactor
+
 	for _, cl := range []stats.ConfidenceLevel{stats.Confidence997, stats.Confidence90, stats.Confidence68} {
-		e := projectEst.WeightedMean
-		sd := projectEst.StandardDeviation * cl.Multiplier
+		e := weightedMean
+		sd := standardDeviation * cl.Multiplier
 
 		eStr := formatFloat(e, roundUp)
 		sdStr := formatFloat(sd, roundUp)
@@ -58,11 +67,11 @@ func (f *MarkdownFormatter) Format(estimation *model.Estimation) string {
 	sb.WriteString("| Type | Time | Cost |\n")
 	sb.WriteString("|------|------|------|\n")
 	sb.WriteString(fmt.Sprintf("| Maximum | %s %s | %s %s |\n",
-		formatFloat(costs.Max.TotalTime, roundUp), f.config.TimeUnit.Acronym,
-		formatFloat(costs.Max.TotalCost, false), f.config.Currency))
+		formatFloat(costs.Max.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+		formatFloat(costs.Max.TotalCost*timeFactor, false), f.config.Currency))
 	sb.WriteString(fmt.Sprintf("| Minimum | %s %s | %s %s |\n",
-		formatFloat(costs.Min.TotalTime, roundUp), f.config.TimeUnit.Acronym,
-		formatFloat(costs.Min.TotalCost, false), f.config.Currency))
+		formatFloat(costs.Min.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+		formatFloat(costs.Min.TotalCost*timeFactor, false), f.config.Currency))
 	sb.WriteString("\n")
 
 	// Cost by Category
@@ -74,8 +83,8 @@ func (f *MarkdownFormatter) Format(estimation *model.Estimation) string {
 		cat := f.config.GetTaskCategory(catID)
 		sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s |\n",
 			cat.Label,
-			formatFloat(catCost.Time, roundUp), f.config.TimeUnit.Acronym,
-			formatFloat(catCost.Cost, false), f.config.Currency))
+			formatFloat(catCost.Time*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+			formatFloat(catCost.Cost*timeFactor, false), f.config.Currency))
 	}
 	sb.WriteString("\n")
 
@@ -86,15 +95,15 @@ func (f *MarkdownFormatter) Format(estimation *model.Estimation) string {
 
 	for _, task := range estimation.GetOrderedTasks() {
 		cat := f.config.GetTaskCategory(task.Category)
-		mean := task.WeightedMean()
-		sd := task.StandardDeviation()
+		mean := task.WeightedMean() * timeFactor
+		sd := task.StandardDeviation() * timeFactor
 
 		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s |\n",
 			task.Label,
 			cat.Label,
-			formatFloat(task.Estimations.Optimistic, false),
-			formatFloat(task.Estimations.Likely, false),
-			formatFloat(task.Estimations.Pessimistic, false),
+			formatFloat(task.Estimations.Optimistic*timeFactor, false),
+			formatFloat(task.Estimations.Likely*timeFactor, false),
+			formatFloat(task.Estimations.Pessimistic*timeFactor, false),
 			formatFloat(mean, roundUp),
 			formatFloat(sd, roundUp),
 		))
@@ -124,4 +133,130 @@ func formatFloat(value float64, roundUp bool) string {
 		return fmt.Sprintf("%.0f", math.Ceil(value))
 	}
 	return fmt.Sprintf("%.2f", value)
+}
+
+// FormatSynthesis formats a synthesis of multiple estimations as markdown
+func (f *MarkdownFormatter) FormatSynthesis(input *SynthesisInput) string {
+	var sb strings.Builder
+
+	// Apply time factor (default to 1.0 if not set)
+	timeFactor := input.TimeFactor
+	if timeFactor == 0 {
+		timeFactor = 1.0
+	}
+
+	// Title
+	if input.Label != "" {
+		sb.WriteString(fmt.Sprintf("# %s\n\n", input.Label))
+	} else {
+		sb.WriteString("# Estimation Synthesis\n\n")
+	}
+
+	// Sources
+	sb.WriteString("## Sources\n\n")
+	sb.WriteString("| File | Label | Tasks |\n")
+	sb.WriteString("|------|-------|-------|\n")
+	for _, source := range input.Sources {
+		sb.WriteString(fmt.Sprintf("| %s | %s | %d |\n", source.File, source.Label, source.Tasks))
+	}
+	sb.WriteString("\n")
+
+	// Summary
+	sb.WriteString("## Summary\n\n")
+	sb.WriteString("| Confidence | Estimation |\n")
+	sb.WriteString("|------------|------------|\n")
+
+	projectEst := stats.CalculateSynthesisEstimation(input.Estimations)
+	roundUp := f.config.RoundUpEstimations
+
+	// Apply time factor
+	weightedMean := projectEst.WeightedMean * timeFactor
+	standardDeviation := projectEst.StandardDeviation * timeFactor
+
+	for _, cl := range []stats.ConfidenceLevel{stats.Confidence997, stats.Confidence90, stats.Confidence68} {
+		e := weightedMean
+		sd := standardDeviation * cl.Multiplier
+
+		eStr := formatFloat(e, roundUp)
+		sdStr := formatFloat(sd, roundUp)
+
+		sb.WriteString(fmt.Sprintf("| >= %s | %s ± %s %s |\n", cl.Name, eStr, sdStr, f.config.TimeUnit.Acronym))
+	}
+	sb.WriteString("\n")
+
+	// Financial Preview
+	sb.WriteString("## Financial Preview\n\n")
+	costs := stats.CalculateSynthesisMinMaxCosts(input.Estimations, f.config, stats.Confidence997)
+
+	sb.WriteString("| Type | Time | Cost |\n")
+	sb.WriteString("|------|------|------|\n")
+	sb.WriteString(fmt.Sprintf("| Maximum | %s %s | %s %s |\n",
+		formatFloat(costs.Max.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+		formatFloat(costs.Max.TotalCost*timeFactor, false), f.config.Currency))
+	sb.WriteString(fmt.Sprintf("| Minimum | %s %s | %s %s |\n",
+		formatFloat(costs.Min.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+		formatFloat(costs.Min.TotalCost*timeFactor, false), f.config.Currency))
+	sb.WriteString("\n")
+
+	// Cost by Category
+	sb.WriteString("### Cost by Category\n\n")
+	sb.WriteString("| Category | Time | Cost |\n")
+	sb.WriteString("|----------|------|------|\n")
+
+	for catID, catCost := range costs.Max.Details {
+		cat := f.config.GetTaskCategory(catID)
+		sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s |\n",
+			cat.Label,
+			formatFloat(catCost.Time*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+			formatFloat(catCost.Cost*timeFactor, false), f.config.Currency))
+	}
+	sb.WriteString("\n")
+
+	// Tasks (if requested)
+	if input.IncludeTasks {
+		sb.WriteString("## Tasks\n\n")
+		sb.WriteString("| Source | Task | Category | Optimistic | Likely | Pessimistic | Mean | SD |\n")
+		sb.WriteString("|--------|------|----------|------------|--------|-------------|------|----|\n")
+
+		for i, est := range input.Estimations {
+			sourceLabel := input.Sources[i].Label
+			if sourceLabel == "" {
+				sourceLabel = input.Sources[i].File
+			}
+			for _, task := range est.GetOrderedTasks() {
+				cat := f.config.GetTaskCategory(task.Category)
+				mean := task.WeightedMean() * timeFactor
+				sd := task.StandardDeviation() * timeFactor
+
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s | %s |\n",
+					sourceLabel,
+					task.Label,
+					cat.Label,
+					formatFloat(task.Estimations.Optimistic*timeFactor, false),
+					formatFloat(task.Estimations.Likely*timeFactor, false),
+					formatFloat(task.Estimations.Pessimistic*timeFactor, false),
+					formatFloat(mean, roundUp),
+					formatFloat(sd, roundUp),
+				))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// Category Distribution
+	sb.WriteString("## Category Distribution\n\n")
+	sb.WriteString("| Category | Percentage |\n")
+	sb.WriteString("|----------|------------|\n")
+
+	distribution := stats.CalculateSynthesisCategoryDistribution(input.Estimations, f.config)
+	for _, dist := range distribution {
+		sb.WriteString(fmt.Sprintf("| %s | %.0f%% |\n", dist.CategoryLabel, dist.Percentage))
+	}
+	sb.WriteString("\n")
+
+	// Footer
+	sb.WriteString("---\n")
+	sb.WriteString(fmt.Sprintf("*Generated by Guesstimate CLI on %s*\n", time.Now().Format("2006-01-02 15:04:05")))
+
+	return sb.String()
 }

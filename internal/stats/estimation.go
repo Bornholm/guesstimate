@@ -200,3 +200,128 @@ func FormatEstimation(value float64, roundUp bool) float64 {
 	}
 	return value
 }
+
+// CalculateSynthesisEstimation calculates the weighted mean and standard deviation across multiple estimations
+func CalculateSynthesisEstimation(estimations []*model.Estimation) EstimationResult {
+	var totalMean float64
+	var totalVariance float64
+
+	for _, estimation := range estimations {
+		for _, task := range estimation.Tasks {
+			totalMean += task.WeightedMean()
+			totalVariance += math.Pow(task.StandardDeviation(), 2)
+		}
+	}
+
+	return EstimationResult{
+		WeightedMean:      totalMean,
+		StandardDeviation: math.Sqrt(totalVariance),
+	}
+}
+
+// CalculateSynthesisCategoryDistribution calculates the distribution of time across categories for multiple estimations
+func CalculateSynthesisCategoryDistribution(estimations []*model.Estimation, config *model.Config) []CategoryDistribution {
+	// First, aggregate all category times
+	categoryTimes := make(map[string]float64)
+	var totalTime float64
+
+	for _, estimation := range estimations {
+		for _, task := range estimation.Tasks {
+			catTime := task.WeightedMean()
+			categoryTimes[task.Category] += catTime
+			totalTime += catTime
+		}
+	}
+
+	if totalTime == 0 {
+		return nil
+	}
+
+	distributions := make([]CategoryDistribution, 0)
+	seenCategories := make(map[string]bool)
+
+	// First, process configured categories
+	for catID, cat := range config.TaskCategories {
+		time := categoryTimes[catID]
+		percentage := 0.0
+		if totalTime > 0 {
+			percentage = (time / totalTime) * 100
+		}
+
+		distributions = append(distributions, CategoryDistribution{
+			CategoryID:    catID,
+			CategoryLabel: cat.Label,
+			Time:          time,
+			Percentage:    percentage,
+		})
+		seenCategories[catID] = true
+	}
+
+	// Then, add any categories from tasks that are not in the config
+	for catID, time := range categoryTimes {
+		if !seenCategories[catID] {
+			percentage := 0.0
+			if totalTime > 0 {
+				percentage = (time / totalTime) * 100
+			}
+			cat := config.GetTaskCategory(catID)
+			distributions = append(distributions, CategoryDistribution{
+				CategoryID:    catID,
+				CategoryLabel: cat.Label,
+				Time:          time,
+				Percentage:    percentage,
+			})
+		}
+	}
+
+	return distributions
+}
+
+// CalculateSynthesisMinMaxCosts calculates the min and max cost estimates for multiple estimations
+func CalculateSynthesisMinMaxCosts(estimations []*model.Estimation, config *model.Config, confidence ConfidenceLevel) MinMaxCost {
+	projectEst := CalculateSynthesisEstimation(estimations)
+	distribution := CalculateSynthesisCategoryDistribution(estimations, config)
+
+	minCost := CostEstimation{
+		Details: make(map[string]CategoryCost),
+	}
+	maxCost := CostEstimation{
+		Details: make(map[string]CategoryCost),
+	}
+
+	// Calculate min estimate (E - SD * multiplier)
+	minTime := math.Max(0, projectEst.WeightedMean-projectEst.StandardDeviation*confidence.Multiplier)
+	// Calculate max estimate (E + SD * multiplier)
+	maxTime := projectEst.WeightedMean + projectEst.StandardDeviation*confidence.Multiplier
+
+	for _, dist := range distribution {
+		cat := config.GetTaskCategory(dist.CategoryID)
+
+		// Min time for this category
+		minCatTime := (dist.Percentage / 100) * minTime
+		minCatCost := minCatTime * cat.CostPerTimeUnit
+		minCost.Details[dist.CategoryID] = CategoryCost{
+			Time:        minCatTime,
+			Cost:        minCatCost,
+			CostPerUnit: cat.CostPerTimeUnit,
+		}
+		minCost.TotalTime += minCatTime
+		minCost.TotalCost += minCatCost
+
+		// Max time for this category
+		maxCatTime := (dist.Percentage / 100) * maxTime
+		maxCatCost := maxCatTime * cat.CostPerTimeUnit
+		maxCost.Details[dist.CategoryID] = CategoryCost{
+			Time:        maxCatTime,
+			Cost:        maxCatCost,
+			CostPerUnit: cat.CostPerTimeUnit,
+		}
+		maxCost.TotalTime += maxCatTime
+		maxCost.TotalCost += maxCatCost
+	}
+
+	return MinMaxCost{
+		Min: minCost,
+		Max: maxCost,
+	}
+}
