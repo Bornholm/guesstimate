@@ -54,8 +54,8 @@ var taskAddCmd = &cobra.Command{
 			category = config.GetFirstCategoryID()
 		}
 
-		// Create task
-		task := model.NewTask(label, category)
+		// Create task (order will be set by AddTask)
+		task := model.NewTask(label, category, 0)
 		task.SetEstimations(optimistic, likely, pessimistic, config.GetAutoEstimationMultiplier())
 
 		// Add task to estimation
@@ -277,6 +277,82 @@ var taskMoveCmd = &cobra.Command{
 	},
 }
 
+// taskReorderCmd represents the task reorder command
+var taskReorderCmd = &cobra.Command{
+	Use:   "reorder <file> [task-id...]",
+	Short: "Reorder tasks",
+	Long: `Reorder tasks in an estimation file.
+
+If task IDs are provided as arguments, tasks will be ordered according to the given sequence.
+Tasks not in the list will be appended at the end in their current order.
+
+If no task IDs are provided, use --by flag to apply a pre-configured ordering:
+  --by category  Order by category label (alphabetically)
+  --by cost      Order by global unit cost (ascending)
+  --by label     Order by task label (alphabetically)
+
+Use --descending flag to reverse the sort order (decreasing instead of increasing).`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		file := args[0]
+		taskIDs := args[1:]
+
+		s := getStore()
+
+		// Load estimation
+		estimation, err := s.LoadEstimation(file)
+		if err != nil {
+			return fmt.Errorf("failed to load estimation: %w", err)
+		}
+
+		// Get flags
+		byFlag, _ := cmd.Flags().GetString("by")
+		descending, _ := cmd.Flags().GetBool("descending")
+
+		if len(taskIDs) > 0 {
+			// Reorder by provided task IDs
+			ids := make([]model.TaskID, len(taskIDs))
+			for i, id := range taskIDs {
+				ids[i] = model.TaskID(id)
+			}
+
+			if err := estimation.ReorderTasks(ids); err != nil {
+				return fmt.Errorf("failed to reorder tasks: %w", err)
+			}
+		} else if byFlag != "" {
+			// Reorder by pre-configured sorting
+			config, err := s.LoadConfig()
+			if err != nil {
+				return fmt.Errorf("failed to load configuration: %w", err)
+			}
+
+			var sortMode model.SortMode
+			switch byFlag {
+			case "category":
+				sortMode = model.SortByCategory
+			case "cost":
+				sortMode = model.SortByCost
+			case "label":
+				sortMode = model.SortByLabel
+			default:
+				return fmt.Errorf("invalid sort mode '%s', must be one of: category, cost, label", byFlag)
+			}
+
+			estimation.SortTasks(sortMode, config, descending)
+		} else {
+			return fmt.Errorf("either task IDs or --by flag must be provided")
+		}
+
+		// Save estimation
+		if err := s.SaveEstimation(file, estimation); err != nil {
+			return fmt.Errorf("failed to save estimation: %w", err)
+		}
+
+		fmt.Println("Tasks reordered successfully")
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskAddCmd)
@@ -284,6 +360,7 @@ func init() {
 	taskCmd.AddCommand(taskRemoveCmd)
 	taskCmd.AddCommand(taskListCmd)
 	taskCmd.AddCommand(taskMoveCmd)
+	taskCmd.AddCommand(taskReorderCmd)
 
 	// task add flags
 	taskAddCmd.Flags().String("category", "", "Task category (default: first category in config)")
@@ -300,4 +377,8 @@ func init() {
 
 	// task list flags
 	taskListCmd.Flags().StringP("format", "f", "table", "Output format (table, json)")
+
+	// task reorder flags
+	taskReorderCmd.Flags().String("by", "", "Pre-configured ordering (category, cost, label)")
+	taskReorderCmd.Flags().BoolP("descending", "d", false, "Sort in descending order (decreasing)")
 }

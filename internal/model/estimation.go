@@ -1,6 +1,8 @@
 package model
 
 import (
+	"fmt"
+	"sort"
 	"time"
 )
 
@@ -14,7 +16,6 @@ type Estimation struct {
 	Description string            `yaml:"description"`
 	CreatedAt   time.Time         `yaml:"createdAt"`
 	UpdatedAt   time.Time         `yaml:"updatedAt"`
-	Ordering    []TaskID          `yaml:"ordering"`
 	Tasks       map[TaskID]*Task  `yaml:"tasks"`
 	Params      *EstimationParams `yaml:"params,omitempty"`
 }
@@ -36,7 +37,6 @@ func NewEstimation(label string) *Estimation {
 		Description: "",
 		CreatedAt:   now,
 		UpdatedAt:   now,
-		Ordering:    []TaskID{},
 		Tasks:       make(map[TaskID]*Task),
 		Params:      nil,
 	}
@@ -44,20 +44,28 @@ func NewEstimation(label string) *Estimation {
 
 // AddTask adds a new task to the estimation
 func (e *Estimation) AddTask(task *Task) {
+	// Set the order to the next available position
+	if task.Order == 0 {
+		task.Order = len(e.Tasks)
+	}
 	e.Tasks[task.ID] = task
-	e.Ordering = append(e.Ordering, task.ID)
 	e.UpdatedAt = time.Now()
 }
 
 // RemoveTask removes a task from the estimation
 func (e *Estimation) RemoveTask(id TaskID) {
+	deletedOrder := -1
+	if task, ok := e.Tasks[id]; ok {
+		deletedOrder = task.Order
+	}
 	delete(e.Tasks, id)
 
-	// Remove from ordering
-	for i, taskID := range e.Ordering {
-		if taskID == id {
-			e.Ordering = append(e.Ordering[:i], e.Ordering[i+1:]...)
-			break
+	// Reindex orders for tasks that came after the deleted one
+	if deletedOrder >= 0 {
+		for _, task := range e.Tasks {
+			if task.Order > deletedOrder {
+				task.Order--
+			}
 		}
 	}
 	e.UpdatedAt = time.Now()
@@ -65,41 +73,151 @@ func (e *Estimation) RemoveTask(id TaskID) {
 
 // MoveTask moves a task in the ordering by the specified offset
 func (e *Estimation) MoveTask(id TaskID, offset int) bool {
-	currentIndex := -1
-	for i, taskID := range e.Ordering {
-		if taskID == id {
-			currentIndex = i
+	task, ok := e.Tasks[id]
+	if !ok {
+		return false
+	}
+
+	currentOrder := task.Order
+	newOrder := currentOrder + offset
+
+	if newOrder < 0 || newOrder >= len(e.Tasks) {
+		return false
+	}
+
+	// Find the task at the new position and swap orders
+	for _, otherTask := range e.Tasks {
+		if otherTask.Order == newOrder {
+			otherTask.Order = currentOrder
 			break
 		}
 	}
 
-	if currentIndex == -1 {
-		return false
-	}
-
-	newIndex := currentIndex + offset
-	if newIndex < 0 || newIndex >= len(e.Ordering) {
-		return false
-	}
-
-	// Remove from current position
-	e.Ordering = append(e.Ordering[:currentIndex], e.Ordering[currentIndex+1:]...)
-	// Insert at new position
-	e.Ordering = append(e.Ordering[:newIndex], append([]TaskID{id}, e.Ordering[newIndex:]...)...)
-
+	task.Order = newOrder
 	e.UpdatedAt = time.Now()
 	return true
 }
 
-// GetOrderedTasks returns tasks in the specified order
+// GetOrderedTasks returns tasks sorted by their Order field
 func (e *Estimation) GetOrderedTasks() []*Task {
 	tasks := make([]*Task, 0, len(e.Tasks))
-	for _, taskID := range e.Ordering {
-		if task, ok := e.Tasks[taskID]; ok {
-			tasks = append(tasks, task)
+	for _, task := range e.Tasks {
+		tasks = append(tasks, task)
+	}
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].Order < tasks[j].Order
+	})
+	return tasks
+}
+
+// ReorderTasks reorders tasks according to the provided list of task IDs
+// Tasks not in the list will be appended at the end in their current order
+func (e *Estimation) ReorderTasks(taskIDs []TaskID) error {
+	// Validate all task IDs exist
+	for _, id := range taskIDs {
+		if _, ok := e.Tasks[id]; !ok {
+			return fmt.Errorf("task with ID '%s' not found", id)
 		}
 	}
-	return tasks
+
+	// Create a set of provided IDs for quick lookup
+	providedIDs := make(map[TaskID]bool)
+	for _, id := range taskIDs {
+		providedIDs[id] = true
+	}
+
+	// Assign new orders
+	order := 0
+	for _, id := range taskIDs {
+		if task, ok := e.Tasks[id]; ok {
+			task.Order = order
+			order++
+		}
+	}
+
+	// Append remaining tasks not in the provided list
+	remainingTasks := make([]*Task, 0)
+	for _, task := range e.Tasks {
+		if !providedIDs[task.ID] {
+			remainingTasks = append(remainingTasks, task)
+		}
+	}
+	// Sort remaining tasks by their current order
+	sort.Slice(remainingTasks, func(i, j int) bool {
+		return remainingTasks[i].Order < remainingTasks[j].Order
+	})
+	for _, task := range remainingTasks {
+		task.Order = order
+		order++
+	}
+
+	e.UpdatedAt = time.Now()
+	return nil
+}
+
+// SortMode defines how tasks should be sorted
+type SortMode string
+
+const (
+	SortByCategory SortMode = "category"
+	SortByCost     SortMode = "cost"
+	SortByLabel    SortMode = "label"
+)
+
+// SortTasks sorts tasks according to the specified mode using the provided config.
+// If descending is true, the sort order is reversed.
+func (e *Estimation) SortTasks(mode SortMode, config *Config, descending bool) {
+	tasks := e.GetOrderedTasks()
+
+	var less func(i, j int) bool
+	switch mode {
+	case SortByCategory:
+		less = func(i, j int) bool {
+			catI := config.GetTaskCategory(tasks[i].Category)
+			catJ := config.GetTaskCategory(tasks[j].Category)
+			if catI.Label == catJ.Label {
+				return tasks[i].Order < tasks[j].Order
+			}
+			return catI.Label < catJ.Label
+		}
+	case SortByCost:
+		less = func(i, j int) bool {
+			catI := config.GetTaskCategory(tasks[i].Category)
+			catJ := config.GetTaskCategory(tasks[j].Category)
+			costI := tasks[i].WeightedMean() * catI.CostPerTimeUnit
+			costJ := tasks[j].WeightedMean() * catJ.CostPerTimeUnit
+			if costI == costJ {
+				return tasks[i].Order < tasks[j].Order
+			}
+			return costI < costJ
+		}
+	case SortByLabel:
+		less = func(i, j int) bool {
+			if tasks[i].Label == tasks[j].Label {
+				return tasks[i].Order < tasks[j].Order
+			}
+			return tasks[i].Label < tasks[j].Label
+		}
+	default:
+		return
+	}
+
+	// If descending, reverse the comparison
+	if descending {
+		originalLess := less
+		less = func(i, j int) bool {
+			return !originalLess(i, j)
+		}
+	}
+
+	sort.Slice(tasks, less)
+
+	// Reassign orders
+	for i, task := range tasks {
+		task.Order = i
+	}
+
+	e.UpdatedAt = time.Now()
 }
 
 // UpdateTask updates an existing task

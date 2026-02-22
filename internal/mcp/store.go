@@ -61,11 +61,6 @@ func (s *ChrootedStore) LoadEstimation(path string) (*model.Estimation, error) {
 		estimation.Tasks = make(map[model.TaskID]*model.Task)
 	}
 
-	// Ensure ordering is initialized
-	if estimation.Ordering == nil {
-		estimation.Ordering = []model.TaskID{}
-	}
-
 	return estimation, nil
 }
 
@@ -92,11 +87,6 @@ func (s *ChrootedStore) LoadOrCreateEstimation(path string, label string) (*mode
 	// Ensure tasks map is initialized
 	if estimation.Tasks == nil {
 		estimation.Tasks = make(map[model.TaskID]*model.Task)
-	}
-
-	// Ensure ordering is initialized
-	if estimation.Ordering == nil {
-		estimation.Ordering = []model.TaskID{}
 	}
 
 	return estimation, false, nil

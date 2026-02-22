@@ -128,11 +128,6 @@ func (s *YAMLStore) LoadEstimation(path string) (*model.Estimation, error) {
 		estimation.Tasks = make(map[model.TaskID]*model.Task)
 	}
 
-	// Ensure ordering is initialized
-	if estimation.Ordering == nil {
-		estimation.Ordering = []model.TaskID{}
-	}
-
 	return estimation, nil
 }
 
@@ -159,11 +154,6 @@ func (s *YAMLStore) LoadOrCreateEstimation(path string, label string) (*model.Es
 	// Ensure tasks map is initialized
 	if estimation.Tasks == nil {
 		estimation.Tasks = make(map[model.TaskID]*model.Task)
-	}
-
-	// Ensure ordering is initialized
-	if estimation.Ordering == nil {
-		estimation.Ordering = []model.TaskID{}
 	}
 
 	return estimation, false, nil

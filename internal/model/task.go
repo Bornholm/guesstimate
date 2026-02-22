@@ -12,6 +12,7 @@ type TaskID string
 // Task represents a single task with 3-point estimation
 type Task struct {
 	ID          TaskID      `yaml:"id"`
+	Order       int         `yaml:"order"`
 	Label       string      `yaml:"label"`
 	Description string      `yaml:"description,omitempty"`
 	Category    string      `yaml:"category"`
@@ -25,10 +26,11 @@ type Estimations struct {
 	Pessimistic float64 `yaml:"pessimistic"`
 }
 
-// NewTask creates a new task with the given label and category
-func NewTask(label, category string) *Task {
+// NewTask creates a new task with the given label, category and order
+func NewTask(label, category string, order int) *Task {
 	return &Task{
 		ID:          TaskID(generateID()),
+		Order:       order,
 		Label:       label,
 		Description: "",
 		Category:    category,

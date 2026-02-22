@@ -2,6 +2,7 @@ package format
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -120,7 +121,7 @@ func (f *MarkdownFormatter) Format(estimation *model.Estimation) string {
 
 func formatFloat(value float64, roundUp bool) string {
 	if roundUp {
-		return fmt.Sprintf("%.0f", value)
+		return fmt.Sprintf("%.0f", math.Ceil(value))
 	}
 	return fmt.Sprintf("%.2f", value)
 }

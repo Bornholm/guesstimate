@@ -72,6 +72,7 @@ func (s *Server) registerTools() {
 	s.registerListEstimationsTool()
 	s.registerCreateEstimationTool()
 	s.registerGetEstimationTool()
+	s.registerUpdateEstimationTool()
 	s.registerDeleteEstimationTool()
 	s.registerGetEstimationSummaryTool()
 
@@ -176,6 +177,55 @@ func (s *Server) registerGetEstimationTool() {
 		result += fmt.Sprintf("Tasks: %d\n", len(estimation.Tasks))
 		result += fmt.Sprintf("Created: %s\n", estimation.CreatedAt.Format("2006-01-02 15:04:05"))
 		result += fmt.Sprintf("Updated: %s\n", estimation.UpdatedAt.Format("2006-01-02 15:04:05"))
+
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: result},
+			},
+		}, nil, nil
+	})
+}
+
+// update_estimation tool
+type updateEstimationArgs struct {
+	Path        string `json:"path" jsonschema:"required,the file path to the estimation"`
+	Label       string `json:"label,omitempty" jsonschema:"optional new label/name for the estimation"`
+	Description string `json:"description,omitempty" jsonschema:"optional new description for the estimation"`
+}
+
+func (s *Server) registerUpdateEstimationTool() {
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "update_estimation",
+		Description: "Update the label and/or description of an estimation",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args updateEstimationArgs) (*mcp.CallToolResult, any, error) {
+		estimation, err := s.store.LoadEstimation(args.Path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to load estimation: %w", err)
+		}
+
+		updated := false
+		if args.Label != "" {
+			estimation.Label = args.Label
+			updated = true
+		}
+		if args.Description != "" {
+			estimation.Description = args.Description
+			updated = true
+		}
+
+		if !updated {
+			return nil, nil, fmt.Errorf("no updates provided, use label and/or description")
+		}
+
+		if err := s.store.SaveEstimation(args.Path, estimation); err != nil {
+			return nil, nil, fmt.Errorf("failed to save estimation: %w", err)
+		}
+
+		result := fmt.Sprintf("Estimation updated:\n")
+		result += fmt.Sprintf("  Label: %s\n", estimation.Label)
+		if estimation.Description != "" {
+			result += fmt.Sprintf("  Description: %s\n", estimation.Description)
+		}
 
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -323,7 +373,7 @@ func (s *Server) registerAddTaskTool() {
 			category = s.config.GetFirstCategoryID()
 		}
 
-		task := model.NewTask(args.Label, category)
+		task := model.NewTask(args.Label, category, 0)
 		task.SetEstimations(args.Optimistic, args.Likely, args.Pessimistic, s.config.GetAutoEstimationMultiplier())
 
 		estimation.AddTask(task)

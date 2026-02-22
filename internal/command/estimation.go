@@ -257,11 +257,58 @@ var listCmd = &cobra.Command{
 	},
 }
 
+// updateCmd represents the update command
+var updateCmd = &cobra.Command{
+	Use:   "update <file>",
+	Short: "Update an estimation",
+	Long:  `Update the label and/or description of an estimation.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		file := args[0]
+
+		s := getStore()
+
+		// Load estimation
+		estimation, err := s.LoadEstimation(file)
+		if err != nil {
+			return fmt.Errorf("failed to load estimation: %w", err)
+		}
+
+		// Get flags
+		label, _ := cmd.Flags().GetString("label")
+		description, _ := cmd.Flags().GetString("description")
+
+		// Update fields if provided
+		updated := false
+		if label != "" {
+			estimation.Label = label
+			updated = true
+		}
+		if cmd.Flags().Changed("description") {
+			estimation.Description = description
+			updated = true
+		}
+
+		if !updated {
+			return fmt.Errorf("no updates provided, use --label and/or --description")
+		}
+
+		// Save estimation
+		if err := s.SaveEstimation(file, estimation); err != nil {
+			return fmt.Errorf("failed to save estimation: %w", err)
+		}
+
+		fmt.Printf("Estimation updated: %s\n", file)
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(newCmd)
 	rootCmd.AddCommand(viewCmd)
 	rootCmd.AddCommand(summaryCmd)
 	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(updateCmd)
 
 	// new command flags
 	newCmd.Flags().StringP("output", "o", "", "Output file path (default: <name>.estimation.yml)")
@@ -274,4 +321,8 @@ func init() {
 
 	// list command flags
 	listCmd.Flags().StringP("format", "f", "text", "Output format (text, json, yaml)")
+
+	// update command flags
+	updateCmd.Flags().StringP("label", "l", "", "New estimation label")
+	updateCmd.Flags().StringP("description", "d", "", "New estimation description")
 }

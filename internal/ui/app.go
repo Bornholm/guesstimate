@@ -575,7 +575,7 @@ func (a *App) addNewTask() {
 
 	// Helper function to add task and close
 	addAndClose := func() {
-		task := model.NewTask(label, category)
+		task := model.NewTask(label, category, 0)
 		task.Description = description
 		// Get values from fields
 		optimisticVal := parseFloat(optimisticField.GetText())
