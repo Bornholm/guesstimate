@@ -10,6 +10,7 @@ type Config struct {
 	Currency                 string                  `yaml:"currency"`
 	RoundUpEstimations       bool                    `yaml:"roundUpEstimations"`
 	AutoEstimationMultiplier float64                 `yaml:"autoEstimationMultiplier,omitempty"`
+	Language                 string                  `yaml:"language,omitempty"`
 }
 
 // TaskCategory represents a category of tasks with associated cost
@@ -52,6 +53,7 @@ func DefaultConfig() *Config {
 		Currency:                 "€ H.T.",
 		RoundUpEstimations:       true,
 		AutoEstimationMultiplier: DefaultAutoEstimationMultiplier,
+		Language:                 "en",
 	}
 }
 
