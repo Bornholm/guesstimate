@@ -25,11 +25,21 @@ func NewMarkdownFormatter(config *model.Config) *MarkdownFormatter {
 
 // Format formats an estimation as markdown
 func (f *MarkdownFormatter) Format(estimation *model.Estimation) string {
-	return f.FormatWithFactor(estimation, 1.0)
+	return f.FormatWithOptions(estimation, FormatOptions{})
 }
 
 // FormatWithFactor formats an estimation as markdown with a time factor applied
 func (f *MarkdownFormatter) FormatWithFactor(estimation *model.Estimation, timeFactor float64) string {
+	return f.FormatWithOptions(estimation, FormatOptions{TimeFactor: timeFactor})
+}
+
+// FormatWithOptions formats an estimation as markdown with the given options
+func (f *MarkdownFormatter) FormatWithOptions(estimation *model.Estimation, opts FormatOptions) string {
+	timeFactor := opts.TimeFactor
+	if timeFactor == 0 {
+		timeFactor = 1.0
+	}
+
 	var sb strings.Builder
 
 	// Title
@@ -42,11 +52,20 @@ func (f *MarkdownFormatter) FormatWithFactor(estimation *model.Estimation, timeF
 
 	// Categories
 	sb.WriteString(fmt.Sprintf("## %s\n\n", i18n.T(i18n.KeyCategories)))
-	sb.WriteString(fmt.Sprintf("| %s | %s |\n", i18n.T(i18n.KeyCategory), i18n.T(i18n.KeyCostPerTimeUnit)))
-	sb.WriteString("|----------|------------------|\n")
-	for catID, cat := range f.config.TaskCategories {
-		sb.WriteString(fmt.Sprintf("| %s | %s %s/%s |\n", cat.Label, formatFloat(cat.CostPerTimeUnit, false), f.config.Currency, f.config.TimeUnit.Acronym))
-		_ = catID // avoid unused variable warning
+	if opts.NoCosts {
+		sb.WriteString(fmt.Sprintf("| %s |\n", i18n.T(i18n.KeyCategory)))
+		sb.WriteString("|----------|\n")
+		for catID, cat := range f.config.TaskCategories {
+			sb.WriteString(fmt.Sprintf("| %s |\n", cat.Label))
+			_ = catID // avoid unused variable warning
+		}
+	} else {
+		sb.WriteString(fmt.Sprintf("| %s | %s |\n", i18n.T(i18n.KeyCategory), i18n.T(i18n.KeyCostPerTimeUnit)))
+		sb.WriteString("|----------|------------------|\n")
+		for catID, cat := range f.config.TaskCategories {
+			sb.WriteString(fmt.Sprintf("| %s | %s %s/%s |\n", cat.Label, formatFloat(cat.CostPerTimeUnit, false), f.config.Currency, f.config.TimeUnit.Acronym))
+			_ = catID // avoid unused variable warning
+		}
 	}
 	sb.WriteString("\n")
 
@@ -73,35 +92,37 @@ func (f *MarkdownFormatter) FormatWithFactor(estimation *model.Estimation, timeF
 	}
 	sb.WriteString("\n")
 
-	// Financial Preview
-	sb.WriteString(fmt.Sprintf("## %s\n\n", i18n.T(i18n.KeyFinancialPreview)))
-	costs := stats.CalculateMinMaxCosts(estimation, f.config, stats.Confidence997)
+	// Financial Preview (only if not hiding costs)
+	if !opts.NoCosts {
+		sb.WriteString(fmt.Sprintf("## %s\n\n", i18n.T(i18n.KeyFinancialPreview)))
+		costs := stats.CalculateMinMaxCosts(estimation, f.config, stats.Confidence997)
 
-	sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", i18n.T(i18n.KeyType), i18n.T(i18n.KeyTime), i18n.T(i18n.KeyCost)))
-	sb.WriteString("|------|------|------|\n")
-	sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s |\n",
-		i18n.T(i18n.KeyMaximum),
-		formatFloat(costs.Max.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
-		formatFloat(costs.Max.TotalCost*timeFactor, false), f.config.Currency))
-	sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s |\n",
-		i18n.T(i18n.KeyMinimum),
-		formatFloat(costs.Min.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
-		formatFloat(costs.Min.TotalCost*timeFactor, false), f.config.Currency))
-	sb.WriteString("\n")
-
-	// Cost by Category
-	sb.WriteString(fmt.Sprintf("### %s\n\n", i18n.T(i18n.KeyCostByCategory)))
-	sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", i18n.T(i18n.KeyCategory), i18n.T(i18n.KeyTime), i18n.T(i18n.KeyCost)))
-	sb.WriteString("|----------|------|------|\n")
-
-	for catID, catCost := range costs.Max.Details {
-		cat := f.config.GetTaskCategory(catID)
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", i18n.T(i18n.KeyType), i18n.T(i18n.KeyTime), i18n.T(i18n.KeyCost)))
+		sb.WriteString("|------|------|------|\n")
 		sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s |\n",
-			cat.Label,
-			formatFloat(catCost.Time*timeFactor, roundUp), f.config.TimeUnit.Acronym,
-			formatFloat(catCost.Cost*timeFactor, false), f.config.Currency))
+			i18n.T(i18n.KeyMaximum),
+			formatFloat(costs.Max.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+			formatFloat(costs.Max.TotalCost*timeFactor, false), f.config.Currency))
+		sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s |\n",
+			i18n.T(i18n.KeyMinimum),
+			formatFloat(costs.Min.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+			formatFloat(costs.Min.TotalCost*timeFactor, false), f.config.Currency))
+		sb.WriteString("\n")
+
+		// Cost by Category
+		sb.WriteString(fmt.Sprintf("### %s\n\n", i18n.T(i18n.KeyCostByCategory)))
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", i18n.T(i18n.KeyCategory), i18n.T(i18n.KeyTime), i18n.T(i18n.KeyCost)))
+		sb.WriteString("|----------|------|------|\n")
+
+		for catID, catCost := range costs.Max.Details {
+			cat := f.config.GetTaskCategory(catID)
+			sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s |\n",
+				cat.Label,
+				formatFloat(catCost.Time*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+				formatFloat(catCost.Cost*timeFactor, false), f.config.Currency))
+		}
+		sb.WriteString("\n")
 	}
-	sb.WriteString("\n")
 
 	// Tasks
 	sb.WriteString(fmt.Sprintf("## %s\n\n", i18n.T(i18n.KeyTasks)))
@@ -171,11 +192,20 @@ func (f *MarkdownFormatter) FormatSynthesis(input *SynthesisInput) string {
 
 	// Categories
 	sb.WriteString(fmt.Sprintf("## %s\n\n", i18n.T(i18n.KeyCategories)))
-	sb.WriteString(fmt.Sprintf("| %s | %s |\n", i18n.T(i18n.KeyCategory), i18n.T(i18n.KeyCostPerTimeUnit)))
-	sb.WriteString("|----------|------------------|\n")
-	for catID, cat := range f.config.TaskCategories {
-		sb.WriteString(fmt.Sprintf("| %s | %s %s/%s |\n", cat.Label, formatFloat(cat.CostPerTimeUnit, false), f.config.Currency, f.config.TimeUnit.Acronym))
-		_ = catID // avoid unused variable warning
+	if input.NoCosts {
+		sb.WriteString(fmt.Sprintf("| %s |\n", i18n.T(i18n.KeyCategory)))
+		sb.WriteString("|----------|\n")
+		for catID, cat := range f.config.TaskCategories {
+			sb.WriteString(fmt.Sprintf("| %s |\n", cat.Label))
+			_ = catID // avoid unused variable warning
+		}
+	} else {
+		sb.WriteString(fmt.Sprintf("| %s | %s |\n", i18n.T(i18n.KeyCategory), i18n.T(i18n.KeyCostPerTimeUnit)))
+		sb.WriteString("|----------|------------------|\n")
+		for catID, cat := range f.config.TaskCategories {
+			sb.WriteString(fmt.Sprintf("| %s | %s %s/%s |\n", cat.Label, formatFloat(cat.CostPerTimeUnit, false), f.config.Currency, f.config.TimeUnit.Acronym))
+			_ = catID // avoid unused variable warning
+		}
 	}
 	sb.WriteString("\n")
 
@@ -211,35 +241,45 @@ func (f *MarkdownFormatter) FormatSynthesis(input *SynthesisInput) string {
 	}
 	sb.WriteString("\n")
 
-	// Financial Preview
-	sb.WriteString(fmt.Sprintf("## %s\n\n", i18n.T(i18n.KeyFinancialPreview)))
-	costs := stats.CalculateSynthesisMinMaxCosts(input.Estimations, f.config, stats.Confidence997)
+	// Financial Preview (only if not hiding costs)
+	if !input.NoCosts {
+		sb.WriteString(fmt.Sprintf("## %s\n\n", i18n.T(i18n.KeyFinancialPreview)))
+		costs := stats.CalculateSynthesisMinMaxCosts(input.Estimations, f.config, stats.Confidence997)
 
-	sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", i18n.T(i18n.KeyType), i18n.T(i18n.KeyTime), i18n.T(i18n.KeyCost)))
-	sb.WriteString("|------|------|------|\n")
-	sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s |\n",
-		i18n.T(i18n.KeyMaximum),
-		formatFloat(costs.Max.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
-		formatFloat(costs.Max.TotalCost*timeFactor, false), f.config.Currency))
-	sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s |\n",
-		i18n.T(i18n.KeyMinimum),
-		formatFloat(costs.Min.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
-		formatFloat(costs.Min.TotalCost*timeFactor, false), f.config.Currency))
-	sb.WriteString("\n")
-
-	// Cost by Category
-	sb.WriteString(fmt.Sprintf("### %s\n\n", i18n.T(i18n.KeyCostByCategory)))
-	sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", i18n.T(i18n.KeyCategory), i18n.T(i18n.KeyTime), i18n.T(i18n.KeyCost)))
-	sb.WriteString("|----------|------|------|\n")
-
-	for catID, catCost := range costs.Max.Details {
-		cat := f.config.GetTaskCategory(catID)
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", i18n.T(i18n.KeyType), i18n.T(i18n.KeyTime), i18n.T(i18n.KeyCost)))
+		sb.WriteString("|------|------|------|\n")
 		sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s |\n",
-			cat.Label,
-			formatFloat(catCost.Time*timeFactor, roundUp), f.config.TimeUnit.Acronym,
-			formatFloat(catCost.Cost*timeFactor, false), f.config.Currency))
+			i18n.T(i18n.KeyMaximum),
+			formatFloat(costs.Max.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+			formatFloat(costs.Max.TotalCost*timeFactor, false), f.config.Currency))
+		sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s |\n",
+			i18n.T(i18n.KeyMinimum),
+			formatFloat(costs.Min.TotalTime*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+			formatFloat(costs.Min.TotalCost*timeFactor, false), f.config.Currency))
+		sb.WriteString("\n")
+
+		// Cost by Category
+		sb.WriteString(fmt.Sprintf("### %s\n\n", i18n.T(i18n.KeyCostByCategory)))
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", i18n.T(i18n.KeyCategory), i18n.T(i18n.KeyTime), i18n.T(i18n.KeyCost), i18n.T(i18n.KeyPercentage)))
+		sb.WriteString("|----------|------|------|------|\n")
+
+		// Calculate total cost for percentage
+		totalCost := costs.Max.TotalCost * timeFactor
+
+		for catID, catCost := range costs.Max.Details {
+			cat := f.config.GetTaskCategory(catID)
+			percentage := 0.0
+			if totalCost > 0 {
+				percentage = (catCost.Cost * timeFactor / totalCost) * 100
+			}
+			sb.WriteString(fmt.Sprintf("| %s | %s %s | %s %s | %.0f%% |\n",
+				cat.Label,
+				formatFloat(catCost.Time*timeFactor, roundUp), f.config.TimeUnit.Acronym,
+				formatFloat(catCost.Cost*timeFactor, false), f.config.Currency,
+				percentage))
+		}
+		sb.WriteString("\n")
 	}
-	sb.WriteString("\n")
 
 	// Tasks (if requested)
 	if input.IncludeTasks {
@@ -278,11 +318,49 @@ func (f *MarkdownFormatter) FormatSynthesis(input *SynthesisInput) string {
 	// Category Distribution
 	sb.WriteString(fmt.Sprintf("## %s\n\n", i18n.T(i18n.KeyCategoryDistribution)))
 	sb.WriteString(fmt.Sprintf("| %s | %s |\n", i18n.T(i18n.KeyCategory), i18n.T(i18n.KeyPercentage)))
-	sb.WriteString("|----------|------------|\n")
+	sb.WriteString("|----------|------------------|\n")
 
 	distribution := stats.CalculateSynthesisCategoryDistribution(input.Estimations, f.config)
 	for _, dist := range distribution {
-		sb.WriteString(fmt.Sprintf("| %s | %.0f%% |\n", dist.CategoryLabel, dist.Percentage))
+		sb.WriteString(fmt.Sprintf("| %s | ~%s %s (%.0f%%) |\n",
+			dist.CategoryLabel,
+			formatFloat(dist.Time*timeFactor, roundUp),
+			f.config.TimeUnit.Acronym,
+			dist.Percentage))
+	}
+	sb.WriteString("\n")
+
+	// Estimation Distribution
+	sb.WriteString(fmt.Sprintf("## %s\n\n", i18n.T(i18n.KeyEstimationDistribution)))
+	sb.WriteString(fmt.Sprintf("| %s | %s |\n", i18n.T(i18n.KeyLabel), i18n.T(i18n.KeyPercentage)))
+	sb.WriteString("|----------|------------------|\n")
+
+	// Calculate total time across all estimations
+	var totalTime float64
+	for _, est := range input.Estimations {
+		projectEst := stats.CalculateProjectEstimation(est)
+		totalTime += projectEst.WeightedMean * timeFactor
+	}
+
+	// Calculate distribution per estimation
+	for i, est := range input.Estimations {
+		projectEst := stats.CalculateProjectEstimation(est)
+		estTime := projectEst.WeightedMean * timeFactor
+		percentage := 0.0
+		if totalTime > 0 {
+			percentage = (estTime / totalTime) * 100
+		}
+
+		label := input.Sources[i].Label
+		if label == "" {
+			label = input.Sources[i].File
+		}
+
+		sb.WriteString(fmt.Sprintf("| %s | ~%s %s (%.0f%%) |\n",
+			label,
+			formatFloat(estTime, roundUp),
+			f.config.TimeUnit.Acronym,
+			percentage))
 	}
 	sb.WriteString("\n")
 

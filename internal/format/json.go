@@ -93,11 +93,11 @@ type CategoryDistributionOutput struct {
 
 // CostOutput represents cost estimation
 type CostOutput struct {
-	Currency   string                `json:"currency"`
-	TimeUnit   string                `json:"timeUnit"`
-	Max        CostDetail            `json:"max"`
-	Min        CostDetail            `json:"min"`
-	ByCategory map[string]CostDetail `json:"byCategory"`
+	Currency   string                `json:"currency,omitempty"`
+	TimeUnit   string                `json:"timeUnit,omitempty"`
+	Max        CostDetail            `json:"max,omitempty"`
+	Min        CostDetail            `json:"min,omitempty"`
+	ByCategory map[string]CostDetail `json:"byCategory,omitempty"`
 }
 
 // CostDetail represents detailed cost information
@@ -108,17 +108,17 @@ type CostDetail struct {
 
 // Format formats an estimation as JSON
 func (f *JSONFormatter) Format(estimation *model.Estimation) (string, error) {
-	output := f.BuildOutput(estimation, 1.0)
-	data, err := json.MarshalIndent(output, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(data) + "\n", nil
+	return f.FormatWithOptions(estimation, FormatOptions{})
 }
 
 // FormatWithFactor formats an estimation as JSON with a time factor applied
 func (f *JSONFormatter) FormatWithFactor(estimation *model.Estimation, timeFactor float64) (string, error) {
-	output := f.BuildOutput(estimation, timeFactor)
+	return f.FormatWithOptions(estimation, FormatOptions{TimeFactor: timeFactor})
+}
+
+// FormatWithOptions formats an estimation as JSON with the given options
+func (f *JSONFormatter) FormatWithOptions(estimation *model.Estimation, opts FormatOptions) (string, error) {
+	output := f.BuildOutput(estimation, opts)
 	data, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
 		return "", err
@@ -126,8 +126,18 @@ func (f *JSONFormatter) FormatWithFactor(estimation *model.Estimation, timeFacto
 	return string(data) + "\n", nil
 }
 
+// FormatOptions represents options for formatting
+type FormatOptions struct {
+	TimeFactor float64
+	NoCosts    bool
+}
+
 // BuildOutput builds the output structure
-func (f *JSONFormatter) BuildOutput(estimation *model.Estimation, timeFactor float64) *Output {
+func (f *JSONFormatter) BuildOutput(estimation *model.Estimation, opts FormatOptions) *Output {
+	timeFactor := opts.TimeFactor
+	if timeFactor == 0 {
+		timeFactor = 1.0
+	}
 	projectEst := stats.CalculateProjectEstimation(estimation)
 	distribution := stats.CalculateCategoryDistribution(estimation, f.config)
 	costs := stats.CalculateMinMaxCosts(estimation, f.config, stats.Confidence997)
@@ -170,12 +180,22 @@ func (f *JSONFormatter) BuildOutput(estimation *model.Estimation, timeFactor flo
 		})
 	}
 
-	// Build costs by category
-	costsByCategory := make(map[string]CostDetail)
-	for catID, catCost := range costs.Max.Details {
-		costsByCategory[catID] = CostDetail{
-			Time: roundFloat(catCost.Time*timeFactor, roundUp),
-			Cost: roundFloat(catCost.Cost*timeFactor, false),
+	var costOutput CostOutput
+	if !opts.NoCosts {
+		// Build costs by category
+		costsByCategory := make(map[string]CostDetail)
+		for catID, catCost := range costs.Max.Details {
+			costsByCategory[catID] = CostDetail{
+				Time: roundFloat(catCost.Time*timeFactor, roundUp),
+				Cost: roundFloat(catCost.Cost*timeFactor, false),
+			}
+		}
+		costOutput = CostOutput{
+			Currency:   f.config.Currency,
+			TimeUnit:   f.config.TimeUnit.Acronym,
+			Max:        CostDetail{Time: roundFloat(costs.Max.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Max.TotalCost*timeFactor, false)},
+			Min:        CostDetail{Time: roundFloat(costs.Min.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Min.TotalCost*timeFactor, false)},
+			ByCategory: costsByCategory,
 		}
 	}
 
@@ -213,13 +233,7 @@ func (f *JSONFormatter) BuildOutput(estimation *model.Estimation, timeFactor flo
 			},
 		},
 		CategoryDistribution: catDist,
-		Costs: CostOutput{
-			Currency:   f.config.Currency,
-			TimeUnit:   f.config.TimeUnit.Acronym,
-			Max:        CostDetail{Time: roundFloat(costs.Max.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Max.TotalCost*timeFactor, false)},
-			Min:        CostDetail{Time: roundFloat(costs.Min.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Min.TotalCost*timeFactor, false)},
-			ByCategory: costsByCategory,
-		},
+		Costs:                costOutput,
 	}
 }
 
@@ -269,6 +283,7 @@ type SynthesisInput struct {
 	Estimations  []*model.Estimation
 	IncludeTasks bool
 	TimeFactor   float64
+	NoCosts      bool
 }
 
 // BuildSynthesisOutput builds the synthesis output structure
@@ -332,12 +347,22 @@ func (f *JSONFormatter) BuildSynthesisOutput(input *SynthesisInput) *SynthesisOu
 		})
 	}
 
-	// Build costs by category
-	costsByCategory := make(map[string]CostDetail)
-	for catID, catCost := range costs.Max.Details {
-		costsByCategory[catID] = CostDetail{
-			Time: roundFloat(catCost.Time*timeFactor, roundUp),
-			Cost: roundFloat(catCost.Cost*timeFactor, false),
+	var costOutput CostOutput
+	if !input.NoCosts {
+		// Build costs by category
+		costsByCategory := make(map[string]CostDetail)
+		for catID, catCost := range costs.Max.Details {
+			costsByCategory[catID] = CostDetail{
+				Time: roundFloat(catCost.Time*timeFactor, roundUp),
+				Cost: roundFloat(catCost.Cost*timeFactor, false),
+			}
+		}
+		costOutput = CostOutput{
+			Currency:   f.config.Currency,
+			TimeUnit:   f.config.TimeUnit.Acronym,
+			Max:        CostDetail{Time: roundFloat(costs.Max.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Max.TotalCost*timeFactor, false)},
+			Min:        CostDetail{Time: roundFloat(costs.Min.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Min.TotalCost*timeFactor, false)},
+			ByCategory: costsByCategory,
 		}
 	}
 
@@ -373,13 +398,7 @@ func (f *JSONFormatter) BuildSynthesisOutput(input *SynthesisInput) *SynthesisOu
 			},
 		},
 		CategoryDistribution: catDist,
-		Costs: CostOutput{
-			Currency:   f.config.Currency,
-			TimeUnit:   f.config.TimeUnit.Acronym,
-			Max:        CostDetail{Time: roundFloat(costs.Max.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Max.TotalCost*timeFactor, false)},
-			Min:        CostDetail{Time: roundFloat(costs.Min.TotalTime*timeFactor, roundUp), Cost: roundFloat(costs.Min.TotalCost*timeFactor, false)},
-			ByCategory: costsByCategory,
-		},
+		Costs:                costOutput,
 	}
 }
 

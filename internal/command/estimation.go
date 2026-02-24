@@ -65,6 +65,7 @@ var viewCmd = &cobra.Command{
 		formatType, _ := cmd.Flags().GetString("format")
 		output, _ := cmd.Flags().GetString("output")
 		timeFactor, _ := cmd.Flags().GetFloat64("time-factor")
+		noCosts, _ := cmd.Flags().GetBool("no-costs")
 
 		s := getStore()
 
@@ -80,29 +81,34 @@ var viewCmd = &cobra.Command{
 			return fmt.Errorf("failed to load configuration: %w", err)
 		}
 
+		opts := format.FormatOptions{
+			TimeFactor: timeFactor,
+			NoCosts:    noCosts,
+		}
+
 		var result string
 
 		switch formatType {
 		case "markdown", "md":
 			formatter := format.NewMarkdownFormatter(config)
-			result = formatter.FormatWithFactor(estimation, timeFactor)
+			result = formatter.FormatWithOptions(estimation, opts)
 		case "json":
 			formatter := format.NewJSONFormatter(config)
 			var err error
-			result, err = formatter.FormatWithFactor(estimation, timeFactor)
+			result, err = formatter.FormatWithOptions(estimation, opts)
 			if err != nil {
 				return fmt.Errorf("failed to format estimation as JSON: %w", err)
 			}
 		case "yaml", "yml":
 			formatter := format.NewYAMLFormatter(config)
 			var err error
-			result, err = formatter.FormatWithFactor(estimation, timeFactor)
+			result, err = formatter.FormatWithOptions(estimation, opts)
 			if err != nil {
 				return fmt.Errorf("failed to format estimation as YAML: %w", err)
 			}
 		default:
 			formatter := format.NewMarkdownFormatter(config)
-			result = formatter.FormatWithFactor(estimation, timeFactor)
+			result = formatter.FormatWithOptions(estimation, opts)
 		}
 
 		// Output result
@@ -316,6 +322,7 @@ var synthesisCmd = &cobra.Command{
 		label, _ := cmd.Flags().GetString("label")
 		includeTasks, _ := cmd.Flags().GetBool("include-tasks")
 		timeFactor, _ := cmd.Flags().GetFloat64("time-factor")
+		noCosts, _ := cmd.Flags().GetBool("no-costs")
 
 		s := getStore()
 
@@ -349,6 +356,7 @@ var synthesisCmd = &cobra.Command{
 			Estimations:  estimations,
 			IncludeTasks: includeTasks,
 			TimeFactor:   timeFactor,
+			NoCosts:      noCosts,
 		}
 
 		var result string
@@ -407,6 +415,7 @@ func init() {
 	viewCmd.Flags().StringP("format", "f", "markdown", "Output format (markdown, json, yaml)")
 	viewCmd.Flags().StringP("output", "o", "", "Output file path (default: stdout)")
 	viewCmd.Flags().Float64("time-factor", 1.0, "Time factor multiplier to apply to estimations")
+	viewCmd.Flags().Bool("no-costs", false, "Hide cost information from output")
 
 	// list command flags
 	listCmd.Flags().StringP("format", "f", "text", "Output format (text, json, yaml)")
@@ -421,4 +430,5 @@ func init() {
 	synthesisCmd.Flags().StringP("label", "l", "", "Optional label for the synthesis")
 	synthesisCmd.Flags().Bool("include-tasks", false, "Include individual tasks in output")
 	synthesisCmd.Flags().Float64("time-factor", 1.0, "Time factor multiplier to apply to estimations")
+	synthesisCmd.Flags().Bool("no-costs", false, "Hide cost information from output")
 }
